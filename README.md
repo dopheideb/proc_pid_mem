@@ -1,0 +1,3 @@
+I couldn't find a way to let gdb search all memory regions of a process. 
+One would have to specify each memory region separately, every time. 
+What a nightmare...
