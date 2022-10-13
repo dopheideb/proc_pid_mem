@@ -85,14 +85,6 @@ void log_debug2(char const * const message, ...)
 
 
 
-enum action
-{
-	action_dump,
-	action_search_all_mem,
-	action_search_non_file,
-};
-int action = action_search_non_file;
-
 // This struct represents the information of a single line in 
 // /proc/pid/maps.
 //
@@ -402,14 +394,7 @@ int main(int argc, char *argv[], char **envp)
 		{"verbose",	no_argument,		NULL,	'v'},
 	};
 	
-	static struct option_tt
-	{
-		union
-		{
-			unsigned long long ull;
-			char * cptr;
-		};
-	} options[256];
+	static struct option_tt options[256];
 	
 	while (1)
 	{
