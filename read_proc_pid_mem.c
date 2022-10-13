@@ -309,7 +309,7 @@ void read_proc_pid_mem(pid_t pid, struct option_tt * options)
 					while (mem_p < mem_buf + size)
 					{
 						printf(
-							"%16llp"
+							"%llu"
 							"   %02hhx %02hhx %02hhx %02hhx %02hhx %02hhx %02hhx %02hhx"
 							"   %02hhx %02hhx %02hhx %02hhx %02hhx %02hhx %02hhx %02hhx"
 							"  |%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c|"
@@ -373,6 +373,7 @@ void read_proc_pid_mem(pid_t pid, struct option_tt * options)
 					if (start)
 					{
 						log_debug("%p: %s (file: '%s')", start, needle, proc_pid_maps_item[0].pathname);
+						printf("%p\n", start);
 						++start;
 					}
 				} while (start != NULL);
