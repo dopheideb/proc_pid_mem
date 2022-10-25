@@ -301,7 +301,7 @@ void read_proc_pid_mem(pid_t pid, struct option_tt * options)
 					while (mem_p < mem_buf + size)
 					{
 						printf(
-							"%llu"
+							"%llx"
 							"   %02hhx %02hhx %02hhx %02hhx %02hhx %02hhx %02hhx %02hhx"
 							"   %02hhx %02hhx %02hhx %02hhx %02hhx %02hhx %02hhx %02hhx"
 							"  |%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c|"
@@ -423,7 +423,6 @@ int main(int argc, char *argv[], char **envp)
 			case 'd': // Dump
 			case 'f': // Don't handle mmap'd files.
 			case 'h': // Hexdump
-				log_debug2("???");
 				options[opt].ull = 1;
 				break;
 			
