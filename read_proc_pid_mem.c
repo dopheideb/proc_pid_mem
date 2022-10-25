@@ -357,18 +357,26 @@ void read_proc_pid_mem(pid_t pid, struct option_tt * options)
 			}
 			else
 			{
-				char * start = mem_buf;
+				char * start_substring = mem_buf;
 				do
 				{
-					size_t len = size - (start - mem_buf);
-					start = memmem(start, len, needle, needle_len);
-					if (start)
-					{
-						log_debug("%p: %s (file: '%s')", start, needle, proc_pid_maps_item[0].pathname);
-						printf("%p\n", start);
-						++start;
+					size_t len = size - (start_substring - mem_buf);
+					start_substring = memmem(start_substring, len, needle, needle_len);
+					if (start_substring)
+					{// start_substring != NULL means: substring found.
+						unsigned long long offset = start_substring - mem_buf;
+						unsigned long long start_needle_in_original_memory = proc_pid_maps_item->start + offset;
+						log_debug("%p: %s (file: '%s')",
+							start_needle_in_original_memory,
+							needle,
+							proc_pid_maps_item[0].pathname
+						);
+						printf("%#llx\n", start_needle_in_original_memory);
+						
+						// Continu searching.
+						++start_substring;
 					}
-				} while (start != NULL);
+				} while (start_substring != NULL);
 			}
 		}
 		
