@@ -35,6 +35,61 @@
 // Flag set by '--verbose'.
 static int verbosity;
 
+void print_usage()
+{
+	fprintf(stderr,
+"Usage: read_proc_pid_mem [options] PID\n"
+"\n"
+"Arguments:\n"
+"    PID:\n"
+"        Mandatory. The process ID (PID) to read/search.\n"
+"\n"
+
+"Options:\n"
+"    -d\n"
+"    --dump\n"
+"        Dump whole 'as is' to stdout. This is basically what one might have hoped for when catting /proc/PID/mem.\n"
+"\n"
+"    -f\n"
+"    --no-files\n"
+"        Ignore memory mapped files. The contents of a file may not be of interest, as the file is usually readable by the user anyway.\n"
+"\n"
+"    -h\n"
+"    --help\n"
+"        Output a usage message and exit.\n" 
+"\n"
+"    -s\n"
+"    --search=STRING\n"
+"       Search memory contents for STRING and output the starting offset of every match.\n"
+"\n"
+"    -v\n"
+"    --verbose\n"
+"        Output diagnostic messages. May be used two times for even more debug messages.\n"
+"\n"
+"    -x\n"
+"    --hexdump\n"
+"        Modifier flag for --dump: output memory contents as a hexdump, like hexdump -Cv does.\n"
+"\n"
+"\n"
+"\n"
+"Examples:\n"
+"\n"
+"    read_proc_pid_mem $(pgrep mygame) --dump\n"
+"        Write the whole memory to stdout. No offsets are given. Includes memory mapped files.\n"
+"\n"
+"    read_proc_pid_mem $(pgrep mytool) --dump --hexdump\n"
+"        Write the whole memory to stdout, in hexdump -Cv format. Offsets are given. Includes memory mapped files.\n"
+"\n"
+"    read_proc_pid_mem $$ -s ssh\n"
+"        Search the shell's memory for string 'ssh'. Outputs startings offsets.\n"
+"\n"
+"    read_proc_pid_mem $$ -s ssh --no-files\n"
+"        Search the shell's memory for string 'ssh'. Outputs startings offsets. Memory mapped files are ignored.\n"
+	);
+}
+
+
+
 void log_format(char const * tag, char const * format, va_list args)
 {
 	// We fancy subsecond precision. ANSI C has no solution. POSIX 
@@ -280,12 +335,13 @@ void read_proc_pid_mem(pid_t pid, struct option_tt * options)
 		
 		if (options['d'].ull)
 		{
-			if (!options['h'].ull)
-			{
+			if (!options['x'].ull)
+			{// --dump, but not --hexdump.
 				write(1, mem_buf, size);
 			}
 			else
 			{
+				// Both --dump and --hexdump, so hexdump memory contents.
 				if (options['f'].ull && proc_pid_maps_item->pathname[0] == '/')
 				{
 					log_debug2("Skipping memory region, since it is mmap()'d and since user told us not to print then.");
@@ -392,12 +448,13 @@ void read_proc_pid_mem(pid_t pid, struct option_tt * options)
 
 int main(int argc, char *argv[], char **envp)
 {
-	char const * const short_options = "dfs:v";
+	char const * const short_options = "dfhs:vx";
 	struct option long_options[] =
 	{
 		{"dump",	no_argument,		NULL,	'd'},
 		{"no-files",	no_argument,		NULL,	'f'},
-		{"hexdump",	no_argument,		NULL,	'h'},
+		{"help",	no_argument,		NULL,	'h'},
+		{"hexdump",	no_argument,		NULL,	'x'},
 		{"search",	required_argument,	NULL,	's'},
 		{"verbose",	no_argument,		NULL,	'v'},
 	};
@@ -428,9 +485,14 @@ int main(int argc, char *argv[], char **envp)
 				log_debug2("Option: %s", long_options[option_index].name);
 				break;
 			
+			case 'h': // Help
+				print_usage();
+				exit(0);
+				break;
+			
 			case 'd': // Dump
 			case 'f': // Don't handle mmap'd files.
-			case 'h': // Hexdump
+			case 'x': // Hexdump
 				options[opt].ull = 1;
 				break;
 			
