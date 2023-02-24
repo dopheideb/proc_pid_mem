@@ -48,7 +48,7 @@ void print_usage()
 "Options:\n"
 "    -d\n"
 "    --dump\n"
-"        Dump whole 'as is' to stdout. This is basically what one might have hoped for when catting /proc/PID/mem.\n"
+"        Dump whole memory 'as is' to stdout. This is basically what one might have hoped for when catting /proc/PID/mem.\n"
 "\n"
 "    -f\n"
 "    --no-files\n"
