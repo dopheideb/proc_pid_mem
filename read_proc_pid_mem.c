@@ -1,4 +1,4 @@
-// Copyright (C) 2022 Bart Dopheide <dopheide at fmf dot nl>
+// Copyright (C) 2022, 2023 Bart Dopheide <dopheide at fmf dot nl>
 // 
 // This program is free software; you can redistribute it and/or modify 
 // it under the terms of the GNU General Public License as published by 
@@ -50,6 +50,10 @@ void print_usage()
 "    --dump\n"
 "        Dump whole memory 'as is' to stdout. This is basically what one might have hoped for when catting /proc/PID/mem.\n"
 "\n"
+"    -D\n"
+"    --hexdump\n"
+"        Dump whole memory as a hexdump, like hexdump -Cv does for regular files.\n"
+"\n"
 "    -f\n"
 "    --no-files\n"
 "        Ignore memory mapped files. The contents of a file may not be of interest, as the file is usually readable by the user anyway.\n"
@@ -62,13 +66,13 @@ void print_usage()
 "    --search=STRING\n"
 "       Search memory contents for STRING and output the starting offset of every match.\n"
 "\n"
+"    -S\n"
+"    --hexsearch=HHHH\n"
+"       Search memory contents for bytes represented by given hexdigit and output the starting offset of every match.\n"
+"\n"
 "    -v\n"
 "    --verbose\n"
 "        Output diagnostic messages. May be used two times for even more debug messages.\n"
-"\n"
-"    -x\n"
-"    --hexdump\n"
-"        Modifier flag for --dump: output memory contents as a hexdump, like hexdump -Cv does.\n"
 "\n"
 "\n"
 "\n"
@@ -77,7 +81,7 @@ void print_usage()
 "    read_proc_pid_mem $(pgrep mygame) --dump\n"
 "        Write the whole memory to stdout. No offsets are given. Includes memory mapped files.\n"
 "\n"
-"    read_proc_pid_mem $(pgrep mytool) --dump --hexdump\n"
+"    read_proc_pid_mem $(pgrep mytool) --hexdump\n"
 "        Write the whole memory to stdout, in hexdump -Cv format. Offsets are given. Includes memory mapped files.\n"
 "\n"
 "    read_proc_pid_mem $$ -s ssh\n"
@@ -85,6 +89,9 @@ void print_usage()
 "\n"
 "    read_proc_pid_mem $$ -s ssh --no-files\n"
 "        Search the shell's memory for string 'ssh'. Outputs startings offsets. Memory mapped files are ignored.\n"
+"\n"
+"    read_proc_pid_mem $$ --hexsearch '66 6f 6f 62 61 72' --no-files\n"
+"        Search the shell's memory for string 'foobar'. Outputs startings offsets. Memory mapped files are ignored.\n"
 	);
 }
 
@@ -273,11 +280,86 @@ struct proc_pid_maps_item * parse_maps(pid_t pid)
 
 void read_proc_pid_mem(pid_t pid, struct option_tt * options)
 {
-	char * needle = options['s'].cptr;
+	char * needle = NULL;
 	unsigned needle_len = 0;
-	if (needle != NULL)
+	
+	if (options['s'].cptr != NULL)
 	{
+		needle = options['s'].cptr;
 		needle_len = strlen(needle);
+	}
+	
+	if (options['S'].cptr != NULL)
+	{
+		needle = options['S'].cptr;
+		needle_len = 0;
+		
+		// Convert hexdigits to bytes.
+		unsigned char byte = 0;
+		unsigned char first_nybble_handled = 0;
+		for (unsigned long long u = 0; options['S'].cptr[u] != '\0'; ++u)
+		{
+			unsigned char nybble = 0;
+			unsigned char cur = options['S'].cptr[u];
+			
+			// We are rewriting in place, so it may be a 
+			// good idea to clear the old search string from 
+			// memory. No functional use, but it may be less 
+			// confusing to see only the converted bytes and 
+			// not a part of the unconverted hexdigits.
+			options['S'].cptr[u] = 0;
+			
+			if (cur >= '0' && cur <= '9')
+			{
+				nybble = cur - '0';
+			}
+			else if (cur >= 'A' && cur <= 'F')
+			{
+				nybble = cur - 'A' + 10;
+			}
+			else if (cur >= 'a' && cur <= 'f')
+			{
+				nybble = cur - 'a' + 10;
+			}
+			else if (isspace(cur))
+			{// Ignore all whitespace.
+				continue;
+			}
+			else if (cur == ':')
+			{// Ignore MAC address style separator.
+				continue;
+			}
+			else
+			{
+				log_error("The hex search string contains an illegal character.");
+				exit(1);
+			}
+			
+			if (first_nybble_handled == 0)
+			{
+				// First nybble is the high nybble.
+				byte = (nybble << 4);
+				first_nybble_handled = 1;
+				continue;
+			}
+			
+			// Second nybble is the low nybble.
+			byte |= nybble;
+			
+			// Write the byte.
+			needle[needle_len] = byte;
+			
+			++needle_len;
+			byte = 0;
+			first_nybble_handled = 0;
+		}
+		
+		log_debug2("The length of the search string after converting hexdigits to bytes: %d", needle_len);
+		if (first_nybble_handled != 0)
+		{
+			log_error("The hex search string contains an odd (i.e. not even) number of hexdigits.");
+			exit(1);
+		}
 	}
 	
 	struct proc_pid_maps_item * proc_pid_maps_items = parse_maps(pid);
@@ -294,8 +376,8 @@ void read_proc_pid_mem(pid_t pid, struct option_tt * options)
 	}
 	
 	// We need ptrace, otherwise we cannot read the program memory.
-	ptrace (PTRACE_ATTACH, pid, NULL, NULL);
-	waitpid (pid, NULL, 0);
+	ptrace(PTRACE_ATTACH, pid, NULL, NULL);
+	waitpid(pid, NULL, 0);
 	
 	char * mem_buf = NULL;
 	unsigned long long mem_buf_size = 0;
@@ -333,80 +415,86 @@ void read_proc_pid_mem(pid_t pid, struct option_tt * options)
 		// mmap() doesn't work in/on /proc/pid/mem.
 		read(mem_fd, mem_buf, size);
 		
-		if (options['d'].ull)
+		// Dump memory contents (raw, not in hex).
+		if (options['d'].ull && !options['D'].ull)
 		{
-			if (!options['x'].ull)
-			{// --dump, but not --hexdump.
-				write(1, mem_buf, size);
+			if (options['f'].ull && proc_pid_maps_item->pathname[0] == '/')
+			{
+				log_debug2("Skipping memory region, since it is mmap()'d and since user told us not to print then.");
 			}
 			else
 			{
-				// Both --dump and --hexdump, so hexdump memory contents.
-				if (options['f'].ull && proc_pid_maps_item->pathname[0] == '/')
+				write(1, mem_buf, size);
+			}
+		}
+		
+		// Hexdump memory contents.
+		if (options['D'].ull)
+		{
+			if (options['f'].ull && proc_pid_maps_item->pathname[0] == '/')
+			{
+				log_debug2("Skipping memory region, since it is mmap()'d and since user told us not to print then.");
+			}
+			else
+			{
+				char * mem_p = mem_buf;
+				unsigned long long offset = proc_pid_maps_item->start;
+				
+				// We are assuming memory regions are 
+				// always a multiple of 16.
+				while (mem_p < mem_buf + size)
 				{
-					log_debug2("Skipping memory region, since it is mmap()'d and since user told us not to print then.");
-				}
-				else
-				{
-					char * mem_p = mem_buf;
-					unsigned long long offset = proc_pid_maps_item->start;
-					
-					// We are assuming memory 
-					// regions are always a multiple 
-					// of 16.
-					while (mem_p < mem_buf + size)
-					{
-						printf(
-							"%llx"
-							"   %02hhx %02hhx %02hhx %02hhx %02hhx %02hhx %02hhx %02hhx"
-							"   %02hhx %02hhx %02hhx %02hhx %02hhx %02hhx %02hhx %02hhx"
-							"  |%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c|"
- 							"   %s"
-							"\n",
-							offset,
-							mem_p[0x0],
-							mem_p[0x1],
-							mem_p[0x2],
-							mem_p[0x3],
-							mem_p[0x4],
-							mem_p[0x5],
-							mem_p[0x6],
-							mem_p[0x7],
-							mem_p[0x8],
-							mem_p[0x9],
-							mem_p[0xa],
-							mem_p[0xb],
-							mem_p[0xc],
-							mem_p[0xd],
-							mem_p[0xe],
-							mem_p[0xf],
-							isprint(mem_p[0x0]) ? mem_p[0x0] : '.',
-							isprint(mem_p[0x1]) ? mem_p[0x1] : '.',
-							isprint(mem_p[0x2]) ? mem_p[0x2] : '.',
-							isprint(mem_p[0x3]) ? mem_p[0x3] : '.',
-							isprint(mem_p[0x4]) ? mem_p[0x4] : '.',
-							isprint(mem_p[0x5]) ? mem_p[0x5] : '.',
-							isprint(mem_p[0x6]) ? mem_p[0x6] : '.',
-							isprint(mem_p[0x7]) ? mem_p[0x7] : '.',
-							isprint(mem_p[0x8]) ? mem_p[0x8] : '.',
-							isprint(mem_p[0x9]) ? mem_p[0x9] : '.',
-							isprint(mem_p[0xa]) ? mem_p[0xa] : '.',
-							isprint(mem_p[0xb]) ? mem_p[0xb] : '.',
-							isprint(mem_p[0xc]) ? mem_p[0xc] : '.',
-							isprint(mem_p[0xd]) ? mem_p[0xd] : '.',
-							isprint(mem_p[0xe]) ? mem_p[0xe] : '.',
-							isprint(mem_p[0xf]) ? mem_p[0xf] : '.',
-							proc_pid_maps_item->pathname
-						);
-						mem_p += 16;
-						offset += 16;
-					}
+					printf(
+						"%llx"
+						"   %02hhx %02hhx %02hhx %02hhx %02hhx %02hhx %02hhx %02hhx"
+						"   %02hhx %02hhx %02hhx %02hhx %02hhx %02hhx %02hhx %02hhx"
+						"  |%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c|"
+						"   %s"
+						"\n",
+						offset,
+						mem_p[0x0],
+						mem_p[0x1],
+						mem_p[0x2],
+						mem_p[0x3],
+						mem_p[0x4],
+						mem_p[0x5],
+						mem_p[0x6],
+						mem_p[0x7],
+						mem_p[0x8],
+						mem_p[0x9],
+						mem_p[0xa],
+						mem_p[0xb],
+						mem_p[0xc],
+						mem_p[0xd],
+						mem_p[0xe],
+						mem_p[0xf],
+						isprint(mem_p[0x0]) ? mem_p[0x0] : '.',
+						isprint(mem_p[0x1]) ? mem_p[0x1] : '.',
+						isprint(mem_p[0x2]) ? mem_p[0x2] : '.',
+						isprint(mem_p[0x3]) ? mem_p[0x3] : '.',
+						isprint(mem_p[0x4]) ? mem_p[0x4] : '.',
+						isprint(mem_p[0x5]) ? mem_p[0x5] : '.',
+						isprint(mem_p[0x6]) ? mem_p[0x6] : '.',
+						isprint(mem_p[0x7]) ? mem_p[0x7] : '.',
+						isprint(mem_p[0x8]) ? mem_p[0x8] : '.',
+						isprint(mem_p[0x9]) ? mem_p[0x9] : '.',
+						isprint(mem_p[0xa]) ? mem_p[0xa] : '.',
+						isprint(mem_p[0xb]) ? mem_p[0xb] : '.',
+						isprint(mem_p[0xc]) ? mem_p[0xc] : '.',
+						isprint(mem_p[0xd]) ? mem_p[0xd] : '.',
+						isprint(mem_p[0xe]) ? mem_p[0xe] : '.',
+						isprint(mem_p[0xf]) ? mem_p[0xf] : '.',
+						proc_pid_maps_item->pathname
+					);
+					mem_p += 16;
+					offset += 16;
 				}
 			}
 		}
 		
-		if (options['s'].cptr != NULL)
+		if (needle)
 		{
+			log_debug2(needle);
 			if (options['f'].ull && proc_pid_maps_item->pathname[0] == '/')
 			{
 				log_debug2("Skipping memory region, since it is mmap()'d and since user told us not to print then.");
@@ -448,14 +536,15 @@ void read_proc_pid_mem(pid_t pid, struct option_tt * options)
 
 int main(int argc, char *argv[], char **envp)
 {
-	char const * const short_options = "dfhs:vx";
+	char const * const short_options = "dDfhs:S:v";
 	struct option long_options[] =
 	{
 		{"dump",	no_argument,		NULL,	'd'},
+		{"hexdump",	no_argument,		NULL,	'D'},
 		{"no-files",	no_argument,		NULL,	'f'},
 		{"help",	no_argument,		NULL,	'h'},
-		{"hexdump",	no_argument,		NULL,	'x'},
 		{"search",	required_argument,	NULL,	's'},
+		{"hexsearch",	required_argument,	NULL,	'S'},
 		{"verbose",	no_argument,		NULL,	'v'},
 	};
 	
@@ -491,13 +580,14 @@ int main(int argc, char *argv[], char **envp)
 				break;
 			
 			case 'd': // Dump
+			case 'D': // Hexdump
 			case 'f': // Don't handle mmap'd files.
-			case 'x': // Hexdump
 				options[opt].ull = 1;
 				break;
 			
 			/* Search. */
-			case 's':
+			case 's': // Search, input is in text.
+			case 'S': // Search, input is in hexdigits.
 				options[opt].cptr = strdup(optarg);
 				break;
 			
